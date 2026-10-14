@@ -12,6 +12,7 @@ sprites, tiles, music and sound effects are all generated in code.
 | Stage | |
 |---|---|
 | Blue Tree Meadow | Where it begins. Tutorial signs. |
+| Homeland | Where the Mega Men come from. Find **the Life**. |
 | Ember Caves | Boss: Magma Golem. Frees **Blaze Man**. |
 | Wind Cliffs | Boss: Cyclone Bird. Frees **Gale Man**. |
 | Volt Plant | Boss: Spark Dynamo. Frees **Volt Man**. |
@@ -29,6 +30,15 @@ the cannon.
 | Gale Man | Higher jump, hold jump to glide | Twin shells |
 | Volt Man | Runs fast, three-way spread | Three-way spread |
 
+**The Life** is a blue box in Homeland with a blue thing inside. Once found it
+powers every Mega Man, in every stage:
+
+- **Double, double, double, double, double jump**: five more jumps in the air.
+- **Super Mega Man Slam Bash**: the Smash Punch turns blue, and where it lands
+  a boom hits everything nearby and throws the Mega Man high into the air.
+- Up there, **hold Down and press Shoot** to shoot straight down: every shot
+  pushes him back up. Down + Jump slams again.
+
 Each Mega Man has his own energy. When one goes down, the next takes over;
 when the whole team is down, you lose a life.
 
@@ -39,7 +49,9 @@ when the whole team is down, you lose a life.
 | Move / climb | Arrows or WASD | D-pad / stick |
 | Jump | Z, Space or K | A |
 | Shoot | X or J | X / Y |
+| Shoot up | Hold Up, press Shoot | |
 | Smash Punch (on foot) | In the air: hold Down, press Shoot | |
+| Shoot down (after a Slam Bash) | Hold Down, press Shoot | |
 | Boost (tank) | Shift, C or L | B / triggers |
 | Switch Mega Man | Q / E, or 1-4 | LB / RB |
 | Pause | Enter, P or Esc | Start |
@@ -61,8 +73,8 @@ Progress (stages cleared, Mega Men freed) is saved in the browser.
 
 - `?debug` exposes `window.game` and adds keys: N jumps to the next checkpoint
   or boss, I toggles invincibility, K destroys the enemies on screen, B leaves
-  the boss on 1 HP, G frees every Mega Man.
-- `?debug&stage=ember` starts straight in a stage (`meadow`, `ember`, `wind`,
+  the boss on 1 HP, G frees every Mega Man and gives the Life.
+- `?debug&stage=ember` starts straight in a stage (`meadow`, `homeland`, `ember`, `wind`,
   `volt`, `hangar`, `village`).
 - `?preview` draws the Launchpad image. `preview.png` is a 512x512 capture of it.
 

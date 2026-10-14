@@ -37,7 +37,7 @@ export const LEVELS = {
     music: 'meadow',
     wake: true,
     signs: [
-      'ARROWS MOVE. Z JUMPS. X SHOOTS - HOLD X TO CHARGE A MEGA SHOT!',
+      'ARROWS MOVE. Z JUMPS. X SHOOTS - HOLD UP TO SHOOT UP, HOLD X TO CHARGE A MEGA SHOT!',
       'IN THE AIR, HOLD DOWN AND PRESS X FOR A SMASH PUNCH. HOLD UP AT A LADDER TO CLIMB.',
     ],
     screens: [

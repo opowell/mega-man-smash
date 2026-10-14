@@ -1157,10 +1157,10 @@ function drawBullet(ctx, cam, b, t) {
     case 'pellet': rect(ctx, x, y, b.w, b.h, '#f8b800'); rect(ctx, x + 1, y + 1, b.w - 2, b.h - 2, '#fcfcfc'); break;
     case 'charged':
       if (!b.vx) {
-        // fired straight down
+        // fired straight down or up
         blob(ctx, cx, cy, 6, 8, f ? '#3cbcfc' : '#a4e4fc');
-        blob(ctx, cx, cy + 2, 4, 5, '#fcfcfc');
-        rect(ctx, cx - 1, y - 6, 2, 6, '#3cbcfc');
+        blob(ctx, cx, cy + (b.vy > 0 ? 2 : -2), 4, 5, '#fcfcfc');
+        rect(ctx, cx - 1, b.vy > 0 ? y - 6 : y + b.h, 2, 6, '#3cbcfc');
         break;
       }
       blob(ctx, cx, cy, 8, 6, f ? '#3cbcfc' : '#a4e4fc');

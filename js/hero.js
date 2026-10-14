@@ -2,7 +2,7 @@
 // differ in speed, jump and weapon (see HEROES in levels.js).
 
 import { HEROES } from './levels.js';
-import { drawSprite, sprite, silhouette, rect } from './gfx.js';
+import { drawSprite, sprite, silhouette, rect, HERO_PAL } from './gfx.js';
 import { Spark, Ring } from './effects.js';
 
 export const GRAV = 0.25;
@@ -130,7 +130,7 @@ export class Hero {
     if (this.vy < -1 && !inp.held('jump') && !this.sky) this.vy = -1;
     this.vy = Math.min(this.vy + GRAV, MAXFALL);
     // the top of the screen is as high as a Mega Man can fly
-    if (this.sky && this.y < 0 && this.vy < 0) { this.y = 0; this.vy = 0; }
+    if (this.hasLife && this.y < 0 && this.vy < 0) { this.y = 0; this.vy = 0; }
     this.gliding = false;
     if (d.glide && inp.held('jump') && this.vy > 0.8) {
       this.vy = 0.8;
@@ -155,7 +155,8 @@ export class Hero {
       w.sfx('smashDive');
       return;
     }
-    this.aimDown = this.sky && inp.held('down');
+    // hold Up to shoot up; up high after a Slam Bash, hold Down to shoot down
+    this.aim = this.sky && inp.held('down') ? 1 : inp.held('up') ? -1 : 0;
     this.handleShoot(inp);
   }
 
@@ -172,6 +173,7 @@ export class Hero {
     this.pendingLaunch = false;
     this.landT = 0;
     this.vy = -9.2;
+    this.onGround = false;
     this.sky = true;
     this.airJumps = AIR_JUMPS;
     this.armorT = 30;
@@ -180,7 +182,7 @@ export class Hero {
 
   startLadder(lx) {
     this.ladder = true;
-    this.aimDown = false;
+    this.aim = 0;
     this.x = lx - this.w / 2;
     this.vx = 0;
     this.vy = 0;
@@ -232,7 +234,7 @@ export class Hero {
   }
 
   fire(charged) {
-    if (this.aimDown) { this.fireDown(charged); return; }
+    if (this.aim) { this.fireVertical(this.aim, charged); return; }
     const w = this.world;
     const d = this.def;
     const own = w.bullets.filter((b) => b.owner === 'p' && b.src === 'hero').length;
@@ -241,6 +243,7 @@ export class Hero {
     const bx = this.cx + dir * 11;
     const by = this.y + 10;
     this.shootT = 16;
+    this.shotAim = 0;
     const shot = (o) => w.playerShot({ src: 'hero', x: bx - o.w / 2, y: by - o.h / 2, ...o });
     switch (charged ? 'charged' : d.shot) {
       case 'buster':
@@ -266,15 +269,21 @@ export class Hero {
     }
   }
 
-  // Shooting straight down, up in the air after a Slam Bash: every shot
-  // pushes the Mega Man up.
-  fireDown(charged) {
-    if (!charged && this.downCool > 0) return;
+  // Shooting straight up (dir -1) or down (dir 1). Down only happens up in
+  // the air after a Slam Bash, and every shot down pushes the Mega Man up.
+  fireVertical(dir, charged) {
     const w = this.world;
-    const bx = this.cx, by = this.y + this.h + 2;
+    if (dir > 0) {
+      if (!charged && this.downCool > 0) return;
+      this.downCool = 7;
+    } else {
+      const own = w.bullets.filter((b) => b.owner === 'p' && b.src === 'hero').length;
+      if (!charged && own >= this.def.max) return;
+    }
+    const bx = this.cx, by = dir > 0 ? this.y + this.h + 2 : this.y - 4;
     this.shootT = 16;
-    this.downCool = 7;
-    const shot = (o) => w.playerShot({ src: 'hero', x: bx - o.w / 2, y: by - o.h / 2, vx: 0, ...o });
+    this.shotAim = dir;
+    const shot = (o) => w.playerShot({ src: 'hero', x: bx - o.w / 2, y: by - o.h / 2, vx: 0, ...o, vy: o.vy * dir });
     switch (charged ? 'charged' : this.def.shot) {
       case 'buster': shot({ w: 4, h: 6, vy: 5, dmg: 1, kind: 'pellet' }); w.sfx('shoot'); break;
       case 'charged': shot({ w: 12, h: 16, vy: 5, dmg: 4, pierce: true, guard: true, kind: 'charged' }); w.sfx('charged'); break;
@@ -285,9 +294,11 @@ export class Hero {
         w.sfx('spread');
         break;
     }
-    this.vy = Math.min(this.vy, charged ? -6 : -3.6);
-    w.effect(new Spark(bx - 4, by, '#fcfcfc', -0.6, 1, 10));
-    w.effect(new Spark(bx + 2, by, '#3cbcfc', 0.6, 1, 10));
+    if (dir > 0) {
+      this.vy = Math.min(this.vy, charged ? -6 : -3.6);
+      w.effect(new Spark(bx - 4, by, '#fcfcfc', -0.6, 1, 10));
+      w.effect(new Spark(bx + 2, by, '#3cbcfc', 0.6, 1, 10));
+    }
   }
 
   pose() {
@@ -312,8 +323,17 @@ export class Hero {
     else if (this.armorT > 0 || (this.sky && this.anim % 8 < 2)) drawGlow(ctx, name, pal, cx, bottom, flip, this.anim, true);
     drawSprite(ctx, name, pal, cx, bottom, flip);
     if (this.shootT > 0 && name !== 'heroSmash' && name !== 'heroHurt') {
-      const arm = sprite('arm', pal, this.facing < 0);
-      ctx.drawImage(arm, this.facing > 0 ? cx + 3 : cx - 9, bottom - 11);
+      if (this.shotAim) {
+        // the buster pointed straight up, or straight down
+        const ax = cx + (this.facing > 0 ? 2 : -7);
+        const ay = this.shotAim < 0 ? bottom - 28 : bottom - 6;
+        rect(ctx, ax, ay, 5, 10, '#000000');
+        rect(ctx, ax + 1, ay + 1, 3, 8, HERO_PAL[pal].L);
+        rect(ctx, ax + 1, this.shotAim < 0 ? ay + 1 : ay + 7, 3, 2, HERO_PAL[pal].D);
+      } else {
+        const arm = sprite('arm', pal, this.facing < 0);
+        ctx.drawImage(arm, this.facing > 0 ? cx + 3 : cx - 9, bottom - 11);
+      }
     }
     if (this.gliding && this.anim % 6 < 3) {
       rect(ctx, cx - 9, bottom - 14, 2, 6, '#fcfcfc');
