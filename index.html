@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Mega Man Smash</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="screen" width="256" height="240"></canvas>
+  <div id="touch" hidden>
+    <div class="pad">
+      <button data-a="up" class="up">&#9650;</button>
+      <button data-a="left" class="left">&#9664;</button>
+      <button data-a="right" class="right">&#9654;</button>
+      <button data-a="down" class="down">&#9660;</button>
+    </div>
+    <div class="small">
+      <button data-a="prev">Q</button>
+      <button data-a="start">&#8801;</button>
+      <button data-a="next">E</button>
+    </div>
+    <div class="act">
+      <button data-a="boost" class="boost">B</button>
+      <button data-a="shoot" class="shoot">X</button>
+      <button data-a="jump" class="jump">Z</button>
+    </div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
