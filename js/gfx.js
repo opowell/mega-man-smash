@@ -551,15 +551,15 @@ function tileLadder(theme) {
   return c;
 }
 
-function tileSpike(theme, dir) {
+function tileSpike(theme, dir, len = 16) {
   const [c, x] = canvas(16, 16);
   const electric = theme === 'volt';
   const light = electric ? '#fcfcfc' : '#fcfcfc';
   const mid = electric ? '#fcbc3c' : '#bcbcbc';
   const dark = electric ? '#c84c0c' : '#7c7c7c';
   for (let s = 0; s < 2; s++) {
-    for (let d = 0; d < 16; d++) {
-      const half = Math.floor((16 - d) / 4);
+    for (let d = 0; d < len; d++) {
+      const half = Math.floor(((len - d) * 4) / len);
       for (let e = -half; e <= half; e++) {
         const along = s * 8 + 4 + e;
         let px, py;
@@ -605,7 +605,7 @@ export function tileSet(theme) {
     alt: tileAlt(theme, false),
     oneway: tileOneway(theme),
     ladder: tileLadder(theme),
-    spike: { up: tileSpike(theme, 'up'), down: tileSpike(theme, 'down'), left: tileSpike(theme, 'left'), right: tileSpike(theme, 'right') },
+    spike: { up: tileSpike(theme, 'up'), down: tileSpike(theme, 'down'), left: tileSpike(theme, 'left'), right: tileSpike(theme, 'right'), floor: tileSpike(theme, 'up', 8) },
     lava: [0, 1, 2, 3].map(tileLava),
     gate: tileGate(),
   };

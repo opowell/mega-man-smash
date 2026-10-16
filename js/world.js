@@ -186,7 +186,12 @@ export class World {
   }
   solidTile(c, r) {
     const t = this.tile(c, r);
-    return t === SOLID || t === ALT || t === SPIKE || (t === GATE && this.gateClosed);
+    return t === SOLID || t === ALT || (t === SPIKE && !this.floorSpike(c, r)) || (t === GATE && this.gateClosed);
+  }
+  // a spike tile open above (and not part of a spike wall) is a pit: the tile
+  // itself is empty, and the spikes line the ground at its bottom
+  floorSpike(c, r) {
+    return this.tile(c, r) === SPIKE && this.tile(c, r + 1) !== SPIKE && !this.solidTile(c, r - 1) && this.tile(c, r - 1) !== LAVA;
   }
   solidAt(px, py) { return this.solidTile(Math.floor(px / 16), Math.floor(py / 16)); }
   tileAt(px, py) { return this.tile(Math.floor(px / 16), Math.floor(py / 16)); }
@@ -255,9 +260,12 @@ export class World {
   }
 
   touchesHazard(e) {
-    const spike = (px, py) => this.tileAt(px, py) === SPIKE;
-    // probes sit well inside the body: spikes taper to points, so the outer
-    // few pixels of a tile are mostly empty space
+    // a spike wall, or the floor of a spike pit
+    const spike = (px, py) => {
+      const c = Math.floor(px / 16), r = Math.floor(py / 16);
+      return (this.tile(c, r) === SPIKE && this.solidTile(c, r)) || this.floorSpike(c, r - 1);
+    };
+    // probes sit a little inside the body: spikes taper to points
     const xs = [e.x + 4, e.x + e.w / 2, e.x + e.w - 4];
     const ys = [e.y + 4, e.y + e.h / 2, e.y + e.h - 4];
     if (xs.some((x) => spike(x, e.y + e.h + 0.5) || spike(x, e.y - 0.5))) return true;
@@ -917,6 +925,7 @@ export class World {
           case ONEWAY: img = T.oneway; break;
           case LADDER: img = T.ladder; break;
           case SPIKE: {
+            if (this.floorSpike(c, r)) break; // drawn with the ground under the pit
             const open = (cc, rr) => !this.solidTile(cc, rr) && this.tile(cc, rr) !== LAVA;
             img = open(c, r - 1) ? T.spike.up : open(c - 1, r) ? T.spike.left : open(c + 1, r) ? T.spike.right : T.spike.down;
             if (open(c, r - 1) || open(c - 1, r) || open(c + 1, r) || open(c, r + 1)) { rect(ctx, x, y, 16, 16, this.theme === 'volt' ? '#000040' : '#383838'); }
@@ -932,6 +941,10 @@ export class World {
             break;
         }
         if (img) ctx.drawImage(img, x, y);
+        if (this.floorSpike(c, r - 1)) {
+          rect(ctx, x, y, 16, 8, this.theme === 'volt' ? '#000040' : '#383838');
+          ctx.drawImage(T.spike.floor, x, y - 8);
+        }
       }
     }
   }
