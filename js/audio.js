@@ -191,6 +191,10 @@ export class Sound {
       case 'warn': this.tone('square', 880, 880, 0.08, 0.12); break;
       case 'board': this.tone('square', 200, 400, 0.15, 0.15); this.tone('square', 400, 800, 0.15, 0.15, 0.15); break;
       case 'text': this.tone('square', 1800, 1800, 0.015, 0.04); break;
+      case 'dig': this.noise(0.14, 0.3, 1200, 0, 200); this.tone('square', 160, 70, 0.1, 0.12); break;
+      case 'glass': this.noise(0.35, 0.35, 8000, 0, 2500); this.tone('triangle', 3200, 1800, 0.12, 0.1); this.tone('triangle', 2600, 1400, 0.12, 0.08, 0.05); break;
+      case 'door': this.tone('sawtooth', 140, 190, 0.5, 0.06); this.noise(0.4, 0.06, 700, 0, 400); break;
+      case 'unlock': this.tone('square', 900, 900, 0.04, 0.12); this.tone('square', 1300, 1300, 0.08, 0.12, 0.07); break;
       case 'pause': this.tone('square', 1200, 600, 0.1, 0.12); break;
     }
   }

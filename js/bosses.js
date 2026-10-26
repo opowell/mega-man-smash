@@ -273,12 +273,12 @@ export class Dynamo extends Boss {
 
 export class Mech extends Boss {
   constructor(world, cx, bottom) {
-    super(world, cx, bottom, 50, 60, 80, 'THE EVIL MECH');
-    this.invTime = 18;
-    this.contact = 6;
+    super(world, cx, bottom, 50, 60, 40, 'THE EVIL MECH');
+    this.invTime = 12;
+    this.contact = 3;
     if (this.arena.top === 0) this.y = -100;
   }
-  get phase2() { return this.hp <= 40; }
+  get phase2() { return this.hp <= 20; }
   update() {
     this.tick();
     if (!this.ready) {
@@ -292,7 +292,7 @@ export class Mech extends Boss {
       return;
     }
     const p = this.player;
-    const spd = this.phase2 ? 1.45 : 1;
+    const spd = this.phase2 ? 1.2 : 0.8;
     if (this.phase2 && this.t % 9 === 0) this.world.effect(new Puff(this.cx + (Math.random() * 40 - 20), this.y + 10, '#585858', 0, -0.6));
     if (this.phase2 && this.t % 14 === 0) this.world.effect(new Spark(this.x + Math.random() * this.w, this.y + 14 + Math.random() * 30, '#fce4a0', Math.random() * 2 - 1, -1, 12));
     const seq = this.phase2 ? ['stomp', 'laser', 'missiles', 'walk', 'barrage', 'laser', 'stomp', 'walk'] : ['walk', 'barrage', 'walk', 'stomp', 'missiles'];
@@ -317,7 +317,7 @@ export class Mech extends Boss {
             const sx = this.cx + this.facing * 22, sy = this.y + 14;
             const tx = p.cx + (k - 1.5) * 26, T = 52, g = 0.15;
             const vy = (this.floor - 6 - sy - 0.5 * g * T * T) / T;
-            this.world.enemyShot(sx, sy, (tx - sx) / T, vy, { kind: 'mshell', w: 8, h: 8, grav: g, dmg: 4 });
+            this.world.enemyShot(sx, sy, (tx - sx) / T, vy, { kind: 'mshell', w: 8, h: 8, grav: g, dmg: 2 });
             this.world.sfx('cannon');
           }
         }
@@ -335,7 +335,7 @@ export class Mech extends Boss {
           this.vx = 0;
           this.world.shake(14);
           this.world.sfx('smash');
-          for (const d of [-1, 1]) this.world.enemyShot(this.cx + d * 26, this.floor - 6, d * 2.6 * spd, 0, { kind: 'shock', w: 14, h: 12, ground: true, dmg: 4 });
+          for (const d of [-1, 1]) this.world.enemyShot(this.cx + d * 26, this.floor - 6, d * 2.6 * spd, 0, { kind: 'shock', w: 14, h: 12, ground: true, dmg: 2 });
           this.setState('idle');
         }
         break;
@@ -343,7 +343,7 @@ export class Mech extends Boss {
         this.vx = 0;
         if (this.timer === 14 || this.timer === 34 || (this.phase2 && this.timer === 54)) {
           const sx = this.timer === 34 ? this.x + this.w + 2 : this.x - 2;
-          this.world.enemyShot(sx, this.y + 8, (sx < this.cx ? -1 : 1) * 0.8, -2.6, { kind: 'missile', w: 10, h: 8, dmg: 4, hp: 1, homing: true, life: 280 });
+          this.world.enemyShot(sx, this.y + 8, (sx < this.cx ? -1 : 1) * 0.8, -2.6, { kind: 'missile', w: 10, h: 8, dmg: 2, hp: 1, homing: true, life: 280 });
           this.world.sfx('launch');
         }
         if (this.timer > 80) this.setState('idle');
@@ -359,7 +359,7 @@ export class Mech extends Boss {
           const ex = this.cx + this.facing * 26;
           const x0 = this.facing > 0 ? ex : this.arena.x + 16;
           const x1 = this.facing > 0 ? this.arena.x + 240 : ex;
-          this.world.enemyShot(x0, this.laserY - 4, 0, 0, { kind: 'laser', w: x1 - x0, h: 8, dmg: 6, life: 34, persist: true, fixed: true });
+          this.world.enemyShot(x0, this.laserY - 4, 0, 0, { kind: 'laser', w: x1 - x0, h: 8, dmg: 3, life: 34, persist: true, fixed: true });
           this.world.sfx('laser');
           this.world.shake(6);
         }

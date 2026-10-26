@@ -8,10 +8,10 @@ import { MAXFALL } from './hero.js';
 const DRIVE = 1.6;
 const BOOST = 3.0;
 const CANNON = {
-  mega: { max: 3 },
-  blaze: { max: 2 },
-  gale: { max: 4 },
-  volt: { max: 6 },
+  mega: { max: 4 },
+  blaze: { max: 3 },
+  gale: { max: 6 },
+  volt: { max: 9 },
 };
 
 export class Tank {
@@ -24,8 +24,8 @@ export class Tank {
     this.vx = 0;
     this.vy = 0;
     this.facing = 1;
-    this.hp = 40;
-    this.maxHp = 40;
+    this.hp = world.id === 'village' ? 64 : 40;
+    this.maxHp = this.hp;
     this.inv = 0;
     this.hurtT = 0;
     this.shootT = 0;
@@ -203,15 +203,14 @@ export class Tank {
     let bx, by, ux, uy;
     if (this.wall) { bx = this.cx; by = this.y - 6; ux = 0; uy = -1; }
     else { bx = this.cx + this.facing * 17; by = this.y + 4; ux = this.facing; uy = 0; }
-    const shot = (o, ang = 0, speed = 5) => {
-      const c = Math.cos(ang), s = Math.sin(ang);
-      w.playerShot({ src: 'tank', x: bx - o.w / 2, y: by - o.h / 2, vx: (ux * c - uy * s) * speed, vy: (ux * s + uy * c) * speed, ...o });
-    };
+    // the rocket leaves the way the gun points: forward, or up when clinging to a wall
+    const base = Math.atan2(uy, ux);
+    const rocket = (da, o = {}) => w.rocket('tank', bx, by, base + da, o);
     switch (pilot) {
-      case 'mega': shot({ w: 8, h: 6, dmg: 2, kind: 'shell' }); break;
-      case 'blaze': shot({ w: 12, h: 10, dmg: 3, pierce: true, guard: true, life: 60, kind: 'fireShell' }, 0, 4); break;
-      case 'gale': shot({ w: 8, h: 6, dmg: 2, kind: 'windShell' }, -0.06, 5.5); shot({ w: 8, h: 6, dmg: 2, kind: 'windShell' }, 0.06, 5.5); break;
-      case 'volt': for (const a of [-0.3, 0, 0.3]) shot({ w: 6, h: 6, dmg: 2, kind: 'voltShell' }, a, 4.5); break;
+      case 'mega': rocket(0); break;
+      case 'blaze': rocket(0, { dmg: 4, pierce: true, guard: true }); break;
+      case 'gale': rocket(-0.12); rocket(0.12); break;
+      case 'volt': for (const a of [-0.3, 0, 0.3]) rocket(a, { dmg: 2 }); break;
     }
     w.sfx('cannon');
     w.effect(new Puff(bx, by, '#fce4a0', ux * 0.5, uy * 0.5));

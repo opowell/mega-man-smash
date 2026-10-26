@@ -7,11 +7,17 @@ import { Hero } from './hero.js';
 import { Tank, drawTankBody } from './tank.js';
 import { makeEnemy } from './enemies.js';
 import { makeBoss } from './bosses.js';
-import { Explosion, DeathBurst, Puff, SmashFlare, Ring, FloatText, SlamBoom, BigText } from './effects.js';
+import { Explosion, DeathBurst, Puff, Spark, SmashFlare, Ring, FloatText, SlamBoom, BigText } from './effects.js';
 import { drawText, wrap } from './font.js';
 
-const EMPTY = 0, SOLID = 1, ALT = 2, ONEWAY = 3, LADDER = 4, SPIKE = 5, LAVA = 6, GATE = 7, ROOF = 8;
-const TILE_OF = { '#': SOLID, '=': ALT, '-': ONEWAY, H: LADDER, '^': SPIKE, '~': LAVA, D: GATE };
+const EMPTY = 0, SOLID = 1, ALT = 2, ONEWAY = 3, LADDER = 4, SPIKE = 5, LAVA = 6, GATE = 7, ROOF = 8, DIRT = 9;
+const PART_OF = { w: 'wood', d: 'dynamite', o: 'bomb' };
+const TILE_OF = { '#': SOLID, '=': ALT, '-': ONEWAY, H: LADDER, '^': SPIKE, '~': LAVA, D: GATE, '%': DIRT };
+
+// Going through a door or a window takes a second; coming out is quicker.
+const HOUSE_IN = 60, HOUSE_OUT = 20;
+// Where the door and the window are on a house (48px wide), and which stretch of it counts as which.
+const DOOR_ZONE = [4, 24], WINDOW_ZONE = [24, 44];
 
 const NULL_IN = { held: () => false, pressed: () => false, released: () => false, anyPressed: () => false };
 
@@ -53,6 +59,16 @@ const LIFE_LINES = [
   'UP HIGH, HOLD DOWN AND PRESS X TO SHOOT DOWN. EVERY SHOT PUSHES YOU UP!',
 ];
 
+const PICKAXE_LINES = [
+  'A PICKAXE! HOLD DOWN AND PRESS X ON THE GROUND TO SWING IT.',
+  'IT BREAKS DIRT: A HOLE IN FRONT OF YOU, OR UNDER YOUR FEET. IN THE VILLAGE IT SMASHES A HOUSE WINDOW SO YOU CAN CLIMB IN WITHOUT A KEY!',
+];
+
+const LAUNCHER_LINES = [
+  'THE GOLD OPENED THE LOCK! A ROCKET LAUNCHER!',
+  'HOLD THE BOOST BUTTON (SHIFT OR C) AND PRESS X TO SHOOT A ROCKET. IT STEERS AFTER ENEMIES!',
+];
+
 const VILLAGE_INTRO = [
   'DR. LIGHT: THIS IS IT - THE VILLAGE. THE MECH\'S ROBOTS ARE EVERYWHERE.',
   'SMASH ALL OF THEM. ONCE THE LAST ONE FALLS, THE GATE TO THE VILLAGE SQUARE OPENS... AND THE EVIL MECH WILL BE WAITING.',
@@ -65,7 +81,7 @@ export class World {
     this.def = LEVELS[id];
     this.theme = this.def.theme;
     this.tiles = tileSet(this.theme);
-    this.run = run || { checkpoint: null, inTank: !!this.def.tank, killed: new Set(), active: 'mega', introDone: false };
+    this.run = run || { checkpoint: null, inTank: !!this.def.tank, killed: new Set(), active: 'mega', introDone: false, keys: 0, got: new Set(), unlocked: new Set(), broken: new Set() };
     this.t = 0;
     this.timer = 0;
     this.cam = { x: 0, y: 0 };
@@ -88,6 +104,9 @@ export class World {
     this.camLock = null;
     this.capsule = null;
     this.lifeBox = null;
+    this.lockBox = null;
+    this.buried = new Set();   // dirt tiles with gold in them
+    this.house = null;         // the house the Mega Man is going into, hiding in, or coming out of
     this.dialog = null;
     this.message = null;
     this.pause = null;
@@ -149,7 +168,16 @@ export class World {
             case 'B': case 'M': this.bossSpawn = { x: cx, y: bottom }; break;
             case 'L': case 'l': this.lifts.push(new Lift(x * 16, r * 16, ch === 'L' ? 96 : 48)); break;
             case 'R': this.decor.push({ kind: 'house', x: x * 16, y: bottom, variant: houses++ }); houseSpots.push([x, r]); break;
-            case 'e': case 'E': case '1': this.items.push(this.makeItem(ch, cx, bottom)); break;
+            case 'e': case 'E': case '1': case 'r': this.items.push(this.makeItem(ch, cx, bottom)); break;
+            case 'p': if (!this.game.save.pickaxe) this.items.push(this.makeItem(ch, cx, bottom)); break;
+            case 'k': {
+              const id = x + ',' + r;
+              if (!this.run.got.has(id)) { const it = this.makeItem(ch, cx, bottom); it.id = id; this.items.push(it); }
+              break;
+            }
+            case 'g': this.map[r * this.cols + x] = DIRT; if (!this.game.save.gold) this.buried.add(r * this.cols + x); break;
+            case 'Q': this.lockBox = { x: cx - 8, y: bottom - 16, w: 16, h: 16, opened: !!this.game.save.launcher, t: 0, cool: 0 }; break;
+            case 'w': case 'd': case 'o': if (!this.game.save.parts?.[PART_OF[ch]]) this.items.push(this.makeItem(ch, cx, bottom)); break;
             case 'X': this.lifeBox = { x: cx - 8, y: bottom - 16, w: 16, h: 16, opened: !!this.game.save.life, t: 0 }; break;
             default: {
               const id = x + ',' + r;
@@ -173,7 +201,7 @@ export class World {
   }
 
   makeItem(type, cx, bottom, ttl = Infinity) {
-    const [w, h] = type === 'e' ? [6, 6] : [12, 12];
+    const [w, h] = type === 'e' ? [6, 6] : type === 'r' ? [10, 16] : type === 'p' ? [14, 14] : type === 'k' ? [12, 8] : type === 'g' ? [10, 9] : [12, 12];
     return { type, x: cx - w / 2, y: bottom - h, w, h, vx: 0, vy: 0, ttl };
   }
 
@@ -186,7 +214,7 @@ export class World {
   }
   solidTile(c, r) {
     const t = this.tile(c, r);
-    return t === SOLID || t === ALT || (t === SPIKE && !this.floorSpike(c, r)) || (t === GATE && this.gateClosed);
+    return t === SOLID || t === ALT || t === DIRT || (t === SPIKE && !this.floorSpike(c, r)) || (t === GATE && this.gateClosed);
   }
   // a spike tile open above (and not part of a spike wall) is a pit: the tile
   // itself is empty, and the spikes line the ground at its bottom
@@ -285,9 +313,17 @@ export class World {
     this.bullets.push({ owner: 'e', kind: 'ball', dmg: 3, ...o, x: x - (o.fixed ? 0 : w / 2), y: o.fixed ? y : y - h / 2, w, h, vx, vy });
   }
 
+  // A rocket leaves the gun the way the gun points, then steers after the nearest enemy.
+  rocket(src, x, y, ang, o = {}) {
+    const w = 10, h = 8, sp = 3;
+    this.playerShot({ src, rocket: true, kind: 'rocket', homing: true, x: x - w / 2, y: y - h / 2, w, h, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, dmg: 3, life: 150, ...o });
+    this.sfx('launch');
+  }
+
+  // Only an enemy that a shot finishes explodes into a power-up.
   drop(x, y) {
     const r = Math.random();
-    const type = r < 0.03 ? '1' : r < 0.12 ? 'E' : r < 0.36 ? 'e' : null;
+    const type = r < 0.05 ? '1' : r < 0.3 ? 'E' : 'e';
     if (type) { const it = this.makeItem(type, x, y + 6, 420); it.vy = -2; this.items.push(it); }
   }
 
@@ -295,7 +331,7 @@ export class World {
     if (!silent) {
       this.explode(e.cx, e.cy);
       this.sfx('kill');
-      this.drop(e.cx, e.cy);
+      if (this.shotKill) this.drop(e.cx, e.cy);
     }
     if (e.isBoss) return;
     if (this.def.clearAll) this.run.killed.add(e.id);
@@ -342,6 +378,134 @@ export class World {
     this.effect(new Ring(this.player.cx, this.player.cy, '#fcfcfc'));
     this.effect(new BigText(b.x + 8, b.y - 30, 'THE LIFE!'));
     this.say(LIFE_LINES);
+  }
+
+  // ------------------------------------------------------------ pickaxe, houses, gold
+
+  // The pickaxe swing (Down + X on the ground): a house window if one is
+  // right there, else the dirt in front (top and bottom, so a Mega Man fits
+  // through), else the dirt under the feet.
+  swing(h) {
+    h.swingT = 14;
+    const win = this.houseAt(h, WINDOW_ZONE);
+    if (win && !this.run.broken.has(win.variant) && this.game.save.pickaxe) { this.breakWindow(win); return; }
+    const col = Math.floor((h.facing > 0 ? h.x + h.w + 4 : h.x - 4) / 16);
+    let n = this.breakDirt(col, Math.floor((h.y + h.h - 2) / 16)) + this.breakDirt(col, Math.floor((h.y + 2) / 16));
+    if (!n) n = this.breakDirt(Math.floor(h.cx / 16), Math.floor((h.y + h.h + 2) / 16));
+    this.sfx(n ? 'dig' : 'tink');
+    if (n) this.shake(3);
+  }
+
+  breakDirt(c, r) {
+    if (this.tile(c, r) !== DIRT) return 0;
+    const i = r * this.cols + c;
+    this.map[i] = EMPTY;
+    for (let k = 0; k < 6; k++) this.effect(new Spark(c * 16 + 8 + Math.random() * 8 - 4, r * 16 + 8, k % 2 ? '#c8883c' : '#7c3808', Math.random() * 3 - 1.5, -1 - Math.random() * 1.5, 18));
+    if (this.buried.delete(i)) {
+      this.items.push(this.makeItem('g', c * 16 + 8, (r + 1) * 16));
+      this.sfx('oneup');
+    }
+    return 1;
+  }
+
+  // A house the player stands in front of: zone is the stretch of the 48px house (door or window).
+  houseAt(p, zone = [4, 44]) {
+    return this.decor.find((d) => d.kind === 'house' && p.cx >= d.x + zone[0] && p.cx < d.x + zone[1] && Math.abs(p.y + p.h - d.y) < 4) || null;
+  }
+
+  breakWindow(d) {
+    this.run.broken.add(d.variant);
+    this.sfx('glass');
+    this.shake(5);
+    for (let k = 0; k < 8; k++) this.effect(new Spark(d.x + 33 + Math.random() * 8 - 4, d.y - 20, k % 2 ? '#f8d878' : '#fcfcfc', Math.random() * 3 - 1.5, -1 - Math.random(), 20));
+    this.enterHouse(d, 'window');
+  }
+
+  enterHouse(d, via) {
+    const p = this.player;
+    p.x = d.x + (via === 'door' ? 15 : 33) - p.w / 2;
+    p.vx = p.vy = 0;
+    p.charge = 0;
+    p.swingT = 0;
+    this.house = { d, via, mode: 'in', t: 0 };
+    this.sfx('door');
+  }
+
+  // What Up does in front of a house: the Mega Man tries the door (a key opens
+  // it for good) or climbs through a broken window; the tank parks and its
+  // pilot hops out. Returns true if the player was taken over this step.
+  updateHouses(inp) {
+    const p = this.player;
+    if (this.house) {
+      const hs = this.house;
+      p.inv = 1;
+      hs.t++;
+      if (hs.mode === 'in' && hs.t >= HOUSE_IN) { hs.mode = 'inside'; hs.t = 0; this.sfx('door'); }
+      else if (hs.mode === 'inside' && inp.anyPressed('down', 'jump')) { hs.mode = 'out'; hs.t = 0; this.sfx('door'); }
+      else if (hs.mode === 'out' && hs.t >= HOUSE_OUT) { this.house = null; p.inv = 30; }
+      return true;
+    }
+    if (this.phase !== 'play' || !inp.pressed('up') || !p.onGround) return false;
+    if (p.isTank) {
+      if (!p.wall && !p.loading && this.houseAt(p)) this.hopOut(this.houseAt(p));
+      return false;
+    }
+    if (p.ladder || p.smashing || p.landT > 0 || p.hurtT > 0) return false;
+    const door = this.houseAt(p, DOOR_ZONE);
+    if (door) {
+      if (this.run.unlocked.has(door.variant)) this.enterHouse(door, 'door');
+      else if (this.run.keys > 0) {
+        this.run.keys--;
+        this.run.unlocked.add(door.variant);
+        this.sfx('unlock');
+        this.effect(new FloatText(p.cx, p.y - 8, 'UNLOCKED', '#f8b800', drawText));
+        this.enterHouse(door, 'door');
+      } else {
+        this.sfx('tink');
+        this.showMessage('LOCKED. FIND A KEY' + (this.game.save.pickaxe ? ', OR BREAK THE WINDOW.' : '.'), 100);
+      }
+      return true;
+    }
+    const win = this.houseAt(p, WINDOW_ZONE);
+    if (win && this.run.broken.has(win.variant)) { this.enterHouse(win, 'window'); return true; }
+    return false;
+  }
+
+  // The tank parks beside the house and its pilot gets out, on foot.
+  hopOut(d) {
+    const t = this.player;
+    const park = d.x - 20;
+    this.tankPickup = { x: park, y: d.y, box: { x: park - 14, y: d.y - 24, w: 28, h: 24 }, hp: t.hp, armed: false };
+    this.inTank = false;
+    const h = new Hero(this, t.cx, t.y + t.h);
+    h.facing = t.facing;
+    h.inv = 30;
+    this.player = h;
+    this.sfx('board');
+    this.effect(new Ring(h.cx, h.cy, '#fcfcfc'));
+    this.showMessage('UP AT A DOOR. WALK INTO THE TANK TO RETURN.', 140);
+  }
+
+  // The gold lock box: gold opens it, and inside is the rocket launcher.
+  updateLockBox() {
+    const b = this.lockBox;
+    if (!b || b.opened || this.inTank) return;
+    if (b.cool > 0) b.cool--;
+    if (!overlap(this.player, { x: b.x - 6, y: b.y - 6, w: b.w + 12, h: b.h + 12 })) return;
+    if (!this.game.save.gold) {
+      if (b.cool <= 0) { b.cool = 240; this.sfx('tink'); this.showMessage('THE GOLD LOCK NEEDS GOLD. DIG THE DIRT!', 150); }
+      return;
+    }
+    b.opened = true;
+    b.t = 0;
+    this.game.save.launcher = true;
+    this.game.persist();
+    this.sfx('oneup');
+    this.shake(6);
+    this.effect(new Ring(b.x + 8, b.y + 8, '#f8b800'));
+    this.effect(new Ring(this.player.cx, this.player.cy, '#fcfcfc'));
+    this.effect(new BigText(b.x + 8, b.y - 30, 'ROCKET LAUNCHER!'));
+    this.say(LAUNCHER_LINES);
   }
 
   // ------------------------------------------------------------ player state changes
@@ -433,9 +597,10 @@ export class World {
     this.inTank = this.run.inTank = true;
     this.player = new Tank(this, k.x, k.y);
     this.player.inv = 30;
+    if (k.hp !== undefined) this.player.hp = k.hp;
     this.sfx('board');
     this.effect(new Ring(k.x, k.y - 12, '#fcfcfc'));
-    this.showMessage('TANK ACQUIRED!', 120);
+    this.showMessage(k.hp !== undefined ? 'BACK IN THE TANK!' : 'TANK ACQUIRED!', 120);
   }
 
   // ------------------------------------------------------------ story beats
@@ -607,12 +772,14 @@ export class World {
 
   updateWorld(inp, withPlayer) {
     for (const l of this.lifts) l.update();
-    const p = this.player;
     const control = this.phase === 'play' || this.phase === 'bossDying';
     if (withPlayer) {
-      p.update(control ? inp : NULL_IN);
-      if (p.y < 0 && p.isTank && p.wall) p.y = 0;
-      if (this.touchesHazard(p) || p.y > this.rows * 16 + 16) this.playerDown('hazard');
+      const busy = control && this.updateHouses(inp);
+      if (!busy) {
+        this.player.update(control ? inp : NULL_IN);
+        if (this.player.y < 0 && this.player.isTank && this.player.wall) this.player.y = 0;
+        if (this.touchesHazard(this.player) || this.player.y > this.rows * 16 + 16) this.playerDown('hazard');
+      }
     }
     if (withPlayer && control && this.phase === 'play') {
       if (inp.pressed('next')) this.swapHero(1);
@@ -629,7 +796,7 @@ export class World {
     }
     this.updateBullets();
     this.updateItems();
-    if (withPlayer && this.phase !== 'ko' && this.phase !== 'dead') this.playerVsEnemies();
+    if (withPlayer && !this.house && this.phase !== 'ko' && this.phase !== 'dead') this.playerVsEnemies();
     if (this.capsule && !this.capsule.landed) {
       const c = this.capsule;
       c.vy = Math.min(c.vy + 0.25, 6);
@@ -645,16 +812,31 @@ export class World {
     const p = this.player;
     for (const b of this.bullets) {
       if (b.homing) {
-        const dx = p.cx - (b.x + b.w / 2), dy = p.cy - (b.y + b.h / 2);
-        const want = Math.atan2(dy, dx);
-        let ang = Math.atan2(b.vy, b.vx);
-        let diff = want - ang;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        ang += clamp(diff, -0.045, 0.045);
-        const sp = Math.min(2, Math.hypot(b.vx, b.vy) + 0.03);
-        b.vx = Math.cos(ang) * sp;
-        b.vy = Math.sin(ang) * sp;
+        let target = p, turn = 0.045, top = 2;
+        if (b.owner === 'p') {
+          // a rocket goes for the closest enemy ahead of it
+          turn = 0.11;
+          top = 4.6;
+          target = null;
+          let best = 170 * 170;
+          for (const e of this.enemies) {
+            if (e.dead || !e.active) continue;
+            const d = (e.cx - b.x) ** 2 + (e.cy - b.y) ** 2;
+            if (d < best) { best = d; target = e; }
+          }
+        }
+        if (target) {
+          const dx = target.cx - (b.x + b.w / 2), dy = target.cy - (b.y + b.h / 2);
+          const want = Math.atan2(dy, dx);
+          let ang = Math.atan2(b.vy, b.vx);
+          let diff = want - ang;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          ang += clamp(diff, -turn, turn);
+          const sp = Math.min(top, Math.hypot(b.vx, b.vy) + (b.owner === 'p' ? 0.12 : 0.03));
+          b.vx = Math.cos(ang) * sp;
+          b.vy = Math.sin(ang) * sp;
+        }
         if (this.t % 4 === 0) this.effect(new Puff(b.x + b.w / 2, b.y + b.h / 2, '#bcbcbc', 0, 0));
       }
       if (b.grav) b.vy += b.grav;
@@ -669,14 +851,16 @@ export class World {
         b.dead = true;
         this.effect(new Puff(b.x + b.w / 2, b.y + b.h / 2, '#fce4a0', 0, 0));
       }
-      if (b.x + b.w < this.cam.x - 40 || b.x > this.cam.x + W + 40 || b.y > H + 40 || b.y < -80) b.dead = true;
+      if (b.x + b.w < this.cam.x - 40 || b.x > this.cam.x + W + 40 || b.y > H + 40 || b.y < -80) { b.dead = true; b.gone = true; }
     }
 
     for (const b of this.bullets) {
       if (b.owner !== 'p' || b.dead) continue;
       for (const e of this.enemies) {
         if (e.dead || !e.active || b.hits?.has(e) || !overlap(b, e)) continue;
+        this.shotKill = b.src === 'hero' || b.src === 'tank' || b.src === 'launcher';
         const res = e.hitBy(b);
+        this.shotKill = false;
         if (res === 'deflect') {
           b.owner = 'x';
           b.vx = -b.vx * 0.7;
@@ -709,7 +893,26 @@ export class World {
         if (this.phase !== 'play') break;
       }
     }
+    for (const b of this.bullets) if (b.dead && b.rocket && !b.gone) this.explode(b.x + b.w / 2, b.y + b.h / 2, 0.6);
     this.bullets = this.bullets.filter((b) => !b.dead);
+  }
+
+  // Wood, dynamite and a bomb make the rocket booster, which makes every Mega Man faster.
+  getPart(part) {
+    const save = this.game.save;
+    const p = this.player;
+    save.parts = { ...save.parts, [part]: true };
+    const have = Object.keys(PART_OF).filter((k) => save.parts[PART_OF[k]]).length;
+    if (have === 3 && !save.booster) {
+      save.booster = true;
+      this.sfx('oneup');
+      this.effect(new Ring(p.cx, p.cy, '#f87858'));
+      this.effect(new FloatText(p.cx, p.y - 8, 'ROCKET BOOSTER!', '#fcd838', drawText));
+    } else {
+      this.sfx('pickup');
+      this.effect(new FloatText(p.cx, p.y - 8, part.toUpperCase() + ' ' + have + '/3', '#fcfcfc', drawText));
+    }
+    this.game.persist();
   }
 
   updateItems() {
@@ -720,9 +923,33 @@ export class World {
         this.move(it);
       }
       if (--it.ttl <= 0) it.dead = true;
-      if (this.phase === 'play' && overlap(it, p)) {
+      if (this.phase === 'play' && overlap(it, p) && !(it.type === 'r' && p.isTank)) {
         it.dead = true;
-        if (it.type === '1') {
+        if (it.type === 'r') {
+          p.getRocket();
+          this.effect(new FloatText(p.cx, p.y - 8, 'ROCKET!', '#fcfcfc', drawText));
+        } else if (it.type === 'p') {
+          this.game.save.pickaxe = true;
+          this.game.persist();
+          this.sfx('oneup');
+          this.effect(new Ring(p.cx, p.cy, '#bcbcbc'));
+          this.effect(new FloatText(p.cx, p.y - 8, 'PICKAXE!', '#fcfcfc', drawText));
+          this.say(PICKAXE_LINES);
+        } else if (it.type === 'g') {
+          this.game.save.gold = true;
+          this.game.persist();
+          this.sfx('oneup');
+          this.effect(new Ring(p.cx, p.cy, '#f8b800'));
+          this.effect(new FloatText(p.cx, p.y - 8, 'GOLD!', '#f8b800', drawText));
+          if (!this.game.save.launcher) this.showMessage('GOLD! OPEN THE GOLD LOCK UP ON THE HILL.', 180);
+        } else if (it.type === 'k') {
+          this.run.keys++;
+          this.run.got.add(it.id);
+          this.sfx('pickup');
+          this.effect(new FloatText(p.cx, p.y - 8, 'KEY X' + this.run.keys, '#f8b800', drawText));
+        } else if (PART_OF[it.type]) {
+          this.getPart(PART_OF[it.type]);
+        } else if (it.type === '1') {
           this.game.lives = Math.min(9, this.game.lives + 1);
           this.sfx('oneup');
           this.effect(new FloatText(p.cx, p.y - 8, '1UP', '#fcfcfc', drawText));
@@ -754,6 +981,18 @@ export class World {
           continue;
         }
         p.hurt(e.contact, e.cx);
+      } else if (!p.smashing && p.vy > 1.2 && !p.ladder && p.y + p.h - p.vy <= e.y + 8) {
+        // landed on its head
+        e.hitBy({ dmg: 2, guard: true, vx: 0 });
+        p.stompBounce();
+        this.sfx('smash');
+        this.effect(new SmashFlare(p.cx, p.y + p.h));
+      } else if (p.sprinting && !e.isBoss) {
+        // running into it flat out: smash, KO
+        e.hitBy({ dmg: 99, guard: true, vx: 0 });
+        this.effect(new SmashFlare(e.cx, e.cy + 6));
+        this.sfx('smash');
+        this.shake(3);
       } else if (p.smashing) {
         if (p.smashHits.has(e)) continue;
         p.smashHits.add(e);
@@ -787,7 +1026,13 @@ export class World {
     }
     this.activeSign = this.signs.find((s) => Math.abs(p.cx - (s.x + 8)) < 22 && Math.abs(p.y + p.h - (s.y + 16)) < 28) || null;
     if (this.goal && overlap(p, this.goal)) this.stageClear();
-    if (this.tankPickup && !this.inTank && overlap(p, this.tankPickup.box)) this.boardTank();
+    const k = this.tankPickup;
+    if (k && !this.inTank && !this.house) {
+      // a tank you parked waits until you have walked away from it once
+      if (!overlap(p, k.box)) k.armed = k.armed === false ? true : k.armed;
+      else if (k.armed !== false) this.boardTank();
+    }
+    this.updateLockBox();
     if (this.gateCol !== null && !this.bossStarted && !this.gateClosed && p.x > (this.gateCol + 1) * 16 + 4) this.startBoss();
     if (this.capsule && this.capsule.landed && overlap(p, this.capsule)) this.rescue();
     // the whole column above the box counts, so jumping over it still finds it
@@ -860,8 +1105,12 @@ export class World {
     if (inp.rawPressed('KeyG')) {
       for (const h of HERO_ORDER) { this.game.addHero(h); if (this.party[h] === undefined) this.party[h] = 28; }
       this.game.save.life = true;
+      this.game.save.booster = true;
+      this.game.save.pickaxe = true;
+      this.game.save.gold = true;
+      this.game.save.launcher = true;
       this.game.persist();
-      this.showMessage('ALL MEGA MEN + THE LIFE', 60);
+      this.showMessage('ALL MEGA MEN + THE LIFE + BOOSTER + PICKAXE + LAUNCHER', 60);
     }
   }
 
@@ -875,11 +1124,13 @@ export class World {
     this.drawTiles(ctx, cam);
     this.drawObjects(ctx, cam);
     if (this.lifeBox) this.drawLifeBox(ctx, cam);
+    if (this.lockBox) this.drawLockBox(ctx, cam);
     for (const it of this.items) this.drawItem(ctx, cam, it);
     for (const e of this.enemies) if (e.active) e.draw(ctx, cam);
     this.drawPlayer(ctx, cam);
     for (const b of this.bullets) drawBullet(ctx, cam, b, this.t);
     for (const f of this.effects) f.draw(ctx, cam);
+    this.drawPrompts(ctx, cam);
     this.drawHud(ctx);
     if (this.activeSign && !this.dialog && this.phase === 'play') this.drawBox(ctx, wrap(this.activeSign.text, 34), 30);
     if (this.message) {
@@ -897,6 +1148,7 @@ export class World {
       else if (d.kind === 'house') {
         if (d.x + 48 < cam.x || d.x > cam.x + W) continue;
         ctx.drawImage(houseImage(d.variant), Math.round(d.x - cam.x), Math.round(d.y - 48 - cam.y));
+        this.drawHouseState(ctx, d, Math.round(d.x - cam.x), Math.round(d.y - 48 - cam.y));
         if (this.ending && this.phase === 'clear' && this.timer > 60) {
           // villagers peek out of the doors
           const vx = Math.round(d.x - cam.x) + 12, vy = Math.round(d.y - cam.y) - 16;
@@ -906,6 +1158,27 @@ export class World {
         }
       }
     }
+  }
+
+  // Over the house picture: a padlock, the door standing open, a smashed window.
+  drawHouseState(ctx, d, hx, hy) {
+    const hs = this.house && this.house.d === d ? this.house : null;
+    const broken = this.run.broken.has(d.variant);
+    if (hs && hs.via === 'door' && hs.mode !== 'inside') {
+      rect(ctx, hx + 10, hy + 31, 10, 17, '#101018');
+      rect(ctx, hx + 10, hy + 31, 3, 17, '#7c3c00');
+    } else if (!this.run.unlocked.has(d.variant)) {
+      rect(ctx, hx + 12, hy + 36, 6, 5, '#000000');
+      rect(ctx, hx + 13, hy + 37, 4, 3, '#f8b800');
+      rect(ctx, hx + 13, hy + 34, 4, 2, '#bcbcbc');
+    }
+    if (broken) {
+      rect(ctx, hx + 28, hy + 25, 10, 8, '#101018');
+      rect(ctx, hx + 28, hy + 25, 3, 3, '#f8d878');
+      rect(ctx, hx + 35, hy + 30, 3, 3, '#f8d878');
+      rect(ctx, hx + 33, hy + 25, 2, 2, '#f8d878');
+    }
+    if (hs && hs.mode === 'inside') rect(ctx, hx + 29, hy + 26, 8, 6, broken ? '#f8b800' : (this.t >> 3) % 2 ? '#fcfcfc' : '#f8d878');
   }
 
   drawTiles(ctx, cam) {
@@ -920,9 +1193,10 @@ export class World {
         const v = (c * 7 + r * 13) % 3;
         let img = null;
         switch (t) {
-          case SOLID: img = above === SOLID || above === ALT || above === SPIKE || r === 0 ? T.solid[v] : T.solidTop[v]; break;
+          case SOLID: img = above === SOLID || above === ALT || above === SPIKE || above === DIRT || r === 0 ? T.solid[v] : T.solidTop[v]; break;
           case ALT: img = above === EMPTY || above === LADDER || above === ONEWAY ? T.altTop : T.alt; break;
           case ONEWAY: img = T.oneway; break;
+          case DIRT: this.drawDirt(ctx, x, y, c, r); break;
           case LADDER: img = T.ladder; break;
           case SPIKE: {
             if (this.floorSpike(c, r)) break; // drawn with the ground under the pit
@@ -946,6 +1220,19 @@ export class World {
           ctx.drawImage(T.spike.floor, x, y - 8);
         }
       }
+    }
+  }
+
+  // A dirt block: brown, speckled, and glinting if gold is buried in it.
+  drawDirt(ctx, x, y, c, r) {
+    rect(ctx, x, y, 16, 16, '#000000');
+    rect(ctx, x + 1, y + 1, 14, 14, '#a05c1c');
+    rect(ctx, x + 1, y + 1, 14, 2, '#c8883c');
+    const v = c * 5 + r * 3;
+    for (let i = 0; i < 5; i++) rect(ctx, x + 2 + ((v + i * 7) % 11), y + 4 + ((v * 3 + i * 5) % 10), 2, 2, i % 2 ? '#6c3c0c' : '#c8883c');
+    if (this.buried.has(r * this.cols + c) && (this.t >> 4) % 3 === 0) {
+      rect(ctx, x + 6, y + 6, 4, 4, '#f8b800');
+      rect(ctx, x + 7, y + 7, 2, 2, '#fcfcfc');
     }
   }
 
@@ -1017,12 +1304,105 @@ export class World {
     }
   }
 
+  drawLockBox(ctx, cam) {
+    const b = this.lockBox;
+    b.t++;
+    const x = Math.round(b.x - cam.x), y = Math.round(b.y - cam.y);
+    if (x < -40 || x > W + 40) return;
+    rect(ctx, x, y + 4, 16, 12, '#000000');
+    rect(ctx, x + 1, y + 5, 14, 10, '#f8b800');
+    rect(ctx, x + 1, y + 5, 14, 2, '#fce4a0');
+    rect(ctx, x + 1, y + 13, 14, 2, '#ac7c00');
+    if (!b.opened) {
+      rect(ctx, x, y, 16, 6, '#000000');
+      rect(ctx, x + 1, y + 1, 14, 4, '#f8b800');
+      rect(ctx, x + 6, y + 6, 4, 5, '#000000');
+      rect(ctx, x + 7, y + 7, 2, 2, '#fcfcfc');
+      for (let i = 0; i < 3; i++) {
+        const a = this.t * 0.06 + i * 2.1;
+        rect(ctx, x + 7 + Math.cos(a) * 13, y + 6 + Math.sin(a) * 9, 2, 2, i % 2 ? '#fcfcfc' : '#f8b800');
+      }
+      if ((this.t >> 4) % 2) drawText(ctx, 'GOLD LOCK', x + 8, y - 12, '#f8b800', { align: 'center', shadow: '#000000' });
+    } else {
+      // the lid is up, and the launcher floats out of the box
+      rect(ctx, x, y - 2, 16, 3, '#000000');
+      rect(ctx, x + 1, y - 1, 14, 1, '#ac7c00');
+      if (b.t < 50) drawLauncher(ctx, x + 2, y + 2 - b.t * 0.8);
+    }
+  }
+
+  // "UP" over a door, and what it will do.
+  housePrompt() {
+    const p = this.player;
+    if (this.house || this.phase !== 'play' || !p.onGround || p.ladder || p.hurtT > 0) return null;
+    if (p.isTank) return this.houseAt(p) ? 'UP: HOP OUT' : null;
+    const door = this.houseAt(p, DOOR_ZONE);
+    if (door) return this.run.unlocked.has(door.variant) ? 'UP: ENTER' : this.run.keys > 0 ? 'UP: USE KEY' : 'LOCKED';
+    const win = this.houseAt(p, WINDOW_ZONE);
+    if (!win) return null;
+    if (this.run.broken.has(win.variant)) return 'UP: ENTER';
+    return this.game.save.pickaxe ? 'DOWN+X: BREAK IN' : null;
+  }
+
+  drawPrompts(ctx, cam) {
+    const hs = this.house;
+    if (hs && hs.mode === 'inside') {
+      drawText(ctx, 'HIDING IN THE HOUSE', W / 2, 40, '#fcfcfc', { align: 'center', shadow: '#000000' });
+      if ((this.t >> 4) % 2) drawText(ctx, 'DOWN: GO OUT', W / 2, 52, '#f8b800', { align: 'center', shadow: '#000000' });
+      return;
+    }
+    const text = this.housePrompt();
+    if (text && (this.t >> 4) % 4 !== 3) {
+      const p = this.player;
+      drawText(ctx, text, Math.round(p.cx - cam.x), Math.round(p.y - 14 - cam.y), text === 'LOCKED' ? '#d82800' : '#fcfcfc', { align: 'center', shadow: '#000000' });
+    }
+  }
+
   drawItem(ctx, cam, it) {
     if (it.ttl < 90 && (this.t >> 2) % 2) return;
     const cx = it.x + it.w / 2 - cam.x, bottom = it.y + it.h - cam.y;
     if (it.type === 'e') drawSprite(ctx, 'pelletS', 'mega', cx, bottom);
     else if (it.type === 'E') drawSprite(ctx, 'pelletL', 'mega', cx, bottom);
+    else if (it.type === 'r') {
+      const x = Math.round(cx) - 5, y = Math.round(bottom) - 16 - Math.round(Math.sin(this.t * 0.1) * 2);
+      rect(ctx, x, y + 2, 10, 14, '#000000');
+      rect(ctx, x + 1, y + 3, 8, 11, '#bcbcbc');
+      rect(ctx, x + 6, y + 3, 3, 11, '#7c7c7c');
+      rect(ctx, x + 3, y, 4, 3, '#000000');
+      rect(ctx, x + 4, y + 1, 2, 2, '#f83800');
+      rect(ctx, x + 3, y + 6, 4, 3, '#3cbcfc');
+      rect(ctx, x + 1, y + 13, 3, 3, '#f83800');
+      rect(ctx, x + 6, y + 13, 3, 3, '#f83800');
+      if ((this.t >> 2) % 2) rect(ctx, x + 4, y + 16, 2, 2, '#fcd838');
+    }
+    else if (it.type === 'p') drawPickaxe(ctx, Math.round(cx), Math.round(bottom) - Math.round(Math.sin(this.t * 0.1) * 1.5));
+    else if (it.type === 'g') drawGold(ctx, Math.round(cx), Math.round(bottom) - Math.round(Math.sin(this.t * 0.2)), this.t);
+    else if (it.type === 'k') drawKey(ctx, Math.round(cx) - 6, Math.round(bottom) - 8 - Math.round(Math.sin(this.t * 0.1) * 1.5));
+    else if (PART_OF[it.type]) this.drawPart(ctx, it.type, Math.round(cx), Math.round(bottom) - Math.round(Math.sin(this.t * 0.1) * 1.5));
     else drawSprite(ctx, 'oneUp', 'mega', cx, bottom);
+  }
+
+  // The three parts of the rocket booster, drawn about 12px square.
+  drawPart(ctx, type, cx, bottom) {
+    const x = cx - 6, y = bottom - 12;
+    if (type === 'w') {
+      rect(ctx, x, y + 3, 12, 8, '#000000');
+      rect(ctx, x + 1, y + 4, 10, 6, '#c84c0c');
+      rect(ctx, x + 1, y + 4, 10, 2, '#fc9838');
+      rect(ctx, x + 8, y + 5, 2, 4, '#7c3808');
+    } else if (type === 'd') {
+      for (const dx of [0, 4, 8]) {
+        rect(ctx, x + dx, y + 3, 4, 9, '#000000');
+        rect(ctx, x + dx + 1, y + 4, 2, 7, '#f83800');
+      }
+      rect(ctx, x + 5, y, 1, 3, '#fcfcfc');
+      if ((this.t >> 2) % 2) rect(ctx, x + 4, y - 1, 3, 2, '#fcd838');
+    } else {
+      blob(ctx, cx, bottom - 5, 5, 5, '#000000');
+      rect(ctx, cx - 3, bottom - 8, 2, 2, '#7c7c7c');
+      rect(ctx, cx + 2, bottom - 12, 1, 3, '#bcbcbc');
+      if ((this.t >> 2) % 2) rect(ctx, cx + 1, bottom - 13, 3, 2, '#fcd838');
+    }
   }
 
   drawPlayer(ctx, cam) {
@@ -1048,6 +1428,15 @@ export class World {
       case 'clear':
         if (this.beamOut) { this.drawBeam(ctx, p.cx - cam.x, p.y + p.h - 24 - cam.y - (this.beamUp || 0)); return; }
         break;
+    }
+    const hs = this.house;
+    if (hs) {
+      const a = hs.mode === 'inside' ? 0 : hs.mode === 'in' ? 1 - hs.t / HOUSE_IN : hs.t / HOUSE_OUT;
+      if (a < 0.03) return;
+      ctx.globalAlpha = Math.min(1, a);
+      p.draw(ctx, cam);
+      ctx.globalAlpha = 1;
+      return;
     }
     p.draw(ctx, cam);
   }
@@ -1132,6 +1521,15 @@ export class World {
     }
     drawText(ctx, 'X' + this.game.lives, 26, 27, '#fcfcfc', { shadow: '#000000' });
     if (this.game.save.life) drawLifeIcon(ctx, 46, 27, this.t);
+    const save = this.game.save;
+    let ix = 58;
+    if (save.pickaxe) { drawPickaxe(ctx, ix + 4, 35); ix += 12; }
+    if (save.gold && !save.launcher) { drawGold(ctx, ix + 4, 35, 0); ix += 12; }
+    if (save.launcher) { drawLauncher(ctx, ix, 27); ix += 14; }
+    if (this.run.keys > 0) {
+      drawKey(ctx, ix, 28);
+      drawText(ctx, 'X' + this.run.keys, ix + 14, 27, '#fcfcfc', { shadow: '#000000' });
+    }
     if (this.def.clearAll && !this.bossStarted) {
       const left = this.enemiesLeft;
       drawText(ctx, left > 0 ? `ROBOTS LEFT ${left}` : 'GATE OPEN >', W / 2 + 10, 12, left > 0 ? '#fcfcfc' : '#b8f818', { align: 'center', shadow: '#000000' });
@@ -1140,6 +1538,43 @@ export class World {
       drawBar(ctx, W - 20, 12, Math.ceil((Math.max(0, this.boss.hp) / this.boss.maxHp) * Math.min(28, this.bossBar)), '#fce4a0', '#f83800');
     }
   }
+}
+
+// A pickaxe, 8px, standing on its bottom at (cx, bottom).
+function drawPickaxe(ctx, cx, bottom) {
+  rect(ctx, cx - 1, bottom - 8, 3, 9, '#000000');
+  rect(ctx, cx, bottom - 7, 1, 8, '#c84c0c');
+  rect(ctx, cx - 5, bottom - 10, 11, 4, '#000000');
+  rect(ctx, cx - 4, bottom - 9, 9, 2, '#bcbcbc');
+  rect(ctx, cx - 4, bottom - 9, 9, 1, '#fcfcfc');
+}
+
+function drawGold(ctx, cx, bottom, t) {
+  rect(ctx, cx - 5, bottom - 8, 10, 8, '#000000');
+  rect(ctx, cx - 4, bottom - 7, 8, 6, '#f8b800');
+  rect(ctx, cx - 4, bottom - 7, 8, 2, '#fce4a0');
+  rect(ctx, cx - 4, bottom - 3, 8, 2, '#ac7c00');
+  if ((t >> 3) % 2) rect(ctx, cx + 2, bottom - 10, 2, 2, '#fcfcfc');
+}
+
+function drawKey(ctx, x, y) {
+  rect(ctx, x, y, 6, 6, '#000000');
+  rect(ctx, x + 1, y + 1, 4, 4, '#f8b800');
+  rect(ctx, x + 2, y + 2, 2, 2, '#000000');
+  rect(ctx, x + 5, y + 2, 7, 3, '#000000');
+  rect(ctx, x + 5, y + 3, 6, 1, '#f8b800');
+  rect(ctx, x + 9, y + 4, 2, 3, '#000000');
+  rect(ctx, x + 9, y + 4, 1, 2, '#f8b800');
+}
+
+function drawLauncher(ctx, x, y) {
+  rect(ctx, x, y + 2, 13, 6, '#000000');
+  rect(ctx, x + 1, y + 3, 11, 4, '#7c7c7c');
+  rect(ctx, x + 1, y + 3, 11, 1, '#bcbcbc');
+  rect(ctx, x + 10, y + 1, 3, 8, '#000000');
+  rect(ctx, x + 11, y + 2, 1, 6, '#f83800');
+  rect(ctx, x + 3, y + 7, 3, 4, '#000000');
+  rect(ctx, x + 4, y + 7, 1, 3, '#f8b800');
 }
 
 function drawLifeIcon(ctx, x, y, t) {
@@ -1233,13 +1668,13 @@ function drawBullet(ctx, cam, b, t) {
         rect(ctx, x + i * 3 + 1, y + b.h - hh, 3, hh, i % 2 ? '#fca044' : '#bcbcbc');
       }
       break;
-    case 'missile': {
+    case 'rocket': case 'missile': {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(Math.atan2(b.vy, b.vx));
       rect(ctx, -6, -3, 12, 6, '#000000');
       rect(ctx, -5, -2, 9, 4, '#bcbcbc');
-      rect(ctx, 3, -2, 3, 4, '#f83800');
+      rect(ctx, 3, -2, 3, 4, b.kind === 'rocket' ? '#3cbcfc' : '#f83800');
       rect(ctx, -8, -1, 3, 2, f ? '#fca044' : '#fce4a0');
       ctx.restore();
       break;

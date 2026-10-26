@@ -39,6 +39,48 @@ powers every Mega Man, in every stage:
 - Up there, **hold Down and press Shoot** to shoot straight down: every shot
   pushes him back up. Down + Jump slams again.
 
+**Moves for everyone**
+
+- **Charge shot**: hold Shoot, and every Mega Man lets go a bigger shot (a
+  bigger flame, gust or spread). In the tank the charged shot is a big rocket.
+- **Wall jump**: in the air, hold toward a wall to slide down it, then press
+  Jump to kick off. Do it as often as you like.
+- **The rocket booster**: find wood (Blue Tree Meadow), dynamite (Homeland) and
+  a bomb (Ember Caves). With all three the booster is built and every Mega Man
+  runs faster, for good.
+
+- **The rocket** sits at the top of a ledge climb in Blue Tree Meadow. Grab it,
+  then hold Jump to fly for 13 seconds. When the fuel runs out you get one air
+  jump to save yourself.
+- **Stomp**: land on an enemy's head to hurt it and bounce, and the bounce
+  gives you an air jump back.
+- **Sprint**: hold Shift (or C) while running. Sprint into a robot and it is
+  smashed and KO'd (bosses are not).
+
+**Homeland's tools**
+
+- **The pickaxe** sits on a ledge you need the double jump to reach. On the
+  ground, hold **Down and press Shoot** to swing it: it breaks the dirt blocks
+  in front of you (top and bottom, so you can walk in), or the one under your
+  feet. It only breaks dirt.
+- **Gold** is buried in the dirt in the hill (it glints). Dig it out.
+- **The rocket launcher** is in the gold lock box on top of that hill, and
+  only gold opens it. Then hold **Boost (Shift or C) and press Shoot** to fire
+  a rocket that steers after enemies (two at a time). Hold Up while you fire
+  to shoot it up.
+
+**Hiding in the village houses**
+
+Press **Up** at a house with the tank and the pilot hops out, on foot (walk
+back into the parked tank to drive on). Then:
+
+- **Door**: it is locked. Pick up a **key** (there are four in the village, and
+  eight houses), stand at the door and press **Up**. The key is used up and the
+  door stays unlocked. Going in takes one second.
+- **Window**: with the pickaxe, stand at the window and press **Down + Shoot**.
+  It smashes and you climb in, no key needed. A broken window stays broken.
+- Inside, nothing can hurt you. Press **Down** to go back out.
+
 Each Mega Man has his own energy. When one goes down, the next takes over;
 when the whole team is down, you lose a life.
 
